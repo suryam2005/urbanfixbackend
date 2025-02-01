@@ -1,0 +1,149 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
+const express = require('express');
+const app = express();
+const jwt = require('jsonwebtoken');
+const { createClient } = require('@supabase/supabase-js');
+const cors = require('cors');
+const multer = require('multer');
+const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+const fs = require('fs');
+
+// Middleware setup
+app.use(cors());
+app.use(express.json()); // Middleware to parse JSON requests
+
+// Supabase setup using environment variables
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
+
+// Secret key for JWT from environment variables
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// Function to generate JWT token
+const generateToken = (user) => {
+  return jwt.sign({ email: user.email, id: user.id }, JWT_SECRET, { expiresIn: '1h' });
+};
+
+// Middleware to authenticate JWT token
+const authenticateToken = (req, res, next) => {
+  const token = req.headers['authorization'];
+  if (!token) return res.status(401).json({ message: 'Access denied. No token provided.' });
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ message: 'Invalid token.' });
+    req.user = user;
+    next();
+  });
+};
+
+// Middleware to authenticate admin
+const authenticateAdmin = (req, res, next) => {
+  const token = req.headers['authorization'];
+  if (!token) return res.status(401).json({ message: 'Access denied. No token provided.' });
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ message: 'Invalid token.' });
+    if (user.role !== 'admin') return res.status(403).json({ message: 'Access denied. Admins only.' });
+    req.user = user;
+    next();
+  });
+};
+
+// Fetch all complaints with filters
+app.get('/admin/complaints', authenticateAdmin, async (req, res) => {
+  const { status, date, user_id } = req.query;
+  let query = supabase.from('complaints').select('*');
+  if (status) query = query.eq('status', status);
+  if (date) query = query.eq('created_at', date);
+  if (user_id) query = query.eq('user_id', user_id);
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ message: 'Error fetching complaints', error });
+  res.json({ complaints: data });
+});
+
+// Update complaint status
+app.put('/admin/complaints/:id/status', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  const { error } = await supabase.from('complaints').update({ status }).eq('id', id);
+  if (error) return res.status(500).json({ message: 'Error updating status', error });
+  res.json({ message: 'Complaint status updated' });
+});
+
+// Fetch all users
+app.get('/admin/users', authenticateAdmin, async (req, res) => {
+  const { data, error } = await supabase.from('users').select('*');
+  if (error) return res.status(500).json({ message: 'Error fetching users', error });
+  res.json({ users: data });
+});
+
+// Assign complaint to a team member
+app.put('/admin/complaints/:id/assign', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { assigned_to } = req.body;
+  const { error } = await supabase.from('complaints').update({ assigned_to }).eq('id', id);
+  if (error) return res.status(500).json({ message: 'Error assigning complaint', error });
+  res.json({ message: 'Complaint assigned successfully' });
+});
+
+// Signup endpoint
+app.post('/signup', async (req, res) => {
+  const { name, email, password } = req.body;
+  try {
+    const { data: user, error } = await supabase.auth.signUp({ email, password, options: { data: { name } } });
+    if (error) return res.status(400).json({ message: error.message });
+    const token = generateToken(user.user);
+    res.status(201).json({ message: 'Signup successful', token, user: user.user });
+  } catch (err) {
+    res.status(500).json({ message: 'An error occurred during signup.' });
+  }
+});
+
+// Login endpoint
+app.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return res.status(401).json({ message: 'Invalid email or password.' });
+    const token = generateToken(data.user);
+    res.json({ message: 'Login successful', token });
+  } catch (err) {
+    res.status(500).json({ message: 'An error occurred during login.' });
+  }
+});
+// Home route
+app.get('/', (req, res) => {
+    res.send('Welcome to the backend server!');
+  });
+  
+  // Submit complaint endpoint
+  app.post('/submit', authenticateToken, async (req, res) => {
+    const { title, description } = req.body;
+    const { id: userId } = req.user;
+  
+    try {
+      const { data, error } = await supabase.from('complaints').insert([{ user_id: userId, title, description, status: 'pending' }]);
+      if (error) throw error;
+      res.status(201).json({ message: 'Complaint submitted successfully', complaint: data });
+    } catch (error) {
+      console.error('Submit error:', error.message);
+      res.status(500).json({ message: 'An error occurred while submitting the complaint.', error: error.message });
+    }
+  });
+  // Profile endpoint
+app.get('/profile', authenticateToken, (req, res) => {
+    res.json({ message: 'User profile loaded', email: req.user.email });
+  });
+  
+  // Start the server for local development
+  if (process.env.NODE_ENV !== 'vercel') {
+    app.listen(PORT, () => {
+      console.log('Server is running on port ' + PORT);
+    });
+  }
+
+// Vercel compatibility
+module.exports = app;
