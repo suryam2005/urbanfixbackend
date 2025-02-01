@@ -52,6 +52,8 @@ const authenticateAdmin = (req, res, next) => {
   });
 };
 
+app.get('/favicon.ico', (req, res) => res.status(204));  // No Content
+
 app.get('/complaints', authenticateToken, async (req, res) => {
   try {
     const { data, error } = await supabase.from('complaints').select('*');
