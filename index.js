@@ -52,6 +52,22 @@ const authenticateAdmin = (req, res, next) => {
   });
 };
 
+app.get('/complaints', authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('complaints').select('*');
+
+    if (error) {
+      console.error('Supabase Fetch Error:', error);
+      return res.status(500).json({ message: 'Error fetching complaints', error: error.message });
+    }
+
+    res.json({ complaints: data });
+  } catch (error) {
+    console.error('Unexpected Error:', error.message);
+    res.status(500).json({ message: 'Unexpected error occurred', error: error.message });
+  }
+});
+
 // Fetch all complaints with filters
 app.get('/admin/complaints', authenticateAdmin, async (req, res) => {
   const { status, date, user_id } = req.query;
@@ -119,18 +135,29 @@ app.get('/', (req, res) => {
     res.send('Welcome to the backend server!');
   });
   
-  // Submit complaint endpoint
   app.post('/submit', authenticateToken, async (req, res) => {
     const { title, description } = req.body;
     const { id: userId } = req.user;
   
+    if (!title || !description) {
+      return res.status(400).json({ message: 'Title and description are required' });
+    }
+  
     try {
-      const { data, error } = await supabase.from('complaints').insert([{ user_id: userId, title, description, status: 'pending' }]);
-      if (error) throw error;
+      const { data, error } = await supabase
+        .from('complaints')
+        .insert([{ user_id: userId, title, description, status: 'pending' }])
+        .select('*');
+  
+      if (error) {
+        console.error('Supabase Insert Error:', error);
+        return res.status(500).json({ message: 'Error inserting complaint', error: error.message });
+      }
+  
       res.status(201).json({ message: 'Complaint submitted successfully', complaint: data });
     } catch (error) {
-      console.error('Submit error:', error.message);
-      res.status(500).json({ message: 'An error occurred while submitting the complaint.', error: error.message });
+      console.error('Unexpected Error:', error.message);
+      res.status(500).json({ message: 'Unexpected error occurred', error: error.message });
     }
   });
   // Profile endpoint
