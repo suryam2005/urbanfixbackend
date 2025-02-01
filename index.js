@@ -135,7 +135,7 @@ app.get('/', (req, res) => {
     res.send('Welcome to the backend server!');
   });
   
-app.post('/submit', authenticateToken, async (req, res) => {
+  app.post('/submit', authenticateToken, async (req, res) => {
     const { title, description } = req.body;
     const { id: userId } = req.user;
   
