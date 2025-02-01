@@ -138,11 +138,12 @@ app.get('/profile', authenticateToken, (req, res) => {
     res.json({ message: 'User profile loaded', email: req.user.email });
   });
   
-  // Start the server for local development
+  const PORT = process.env.PORT || 3000; // Set default port
+
   if (process.env.NODE_ENV !== 'vercel') {
-    app.listen(PORT, () => {
-      console.log('Server is running on port ' + PORT);
-    });
+      app.listen(PORT, () => {
+        console.log('Server is running on port ' + PORT);
+      });
   }
 
 // Vercel compatibility
