@@ -138,6 +138,9 @@ app.get('/', (req, res) => {
   });
   
   app.post('/submit', authenticateToken, async (req, res) => {
+    console.log('Request body:', req.body);  // Log the request body to check what is being sent
+    console.log('Token received:', req.headers['authorization']); // Log the token to check if it's being passed correctly
+  
     const { title, description } = req.body;
     const { id: userId } = req.user;
   
@@ -156,6 +159,7 @@ app.get('/', (req, res) => {
         return res.status(500).json({ message: 'Error inserting complaint', error: error.message });
       }
   
+      console.log('Complaint inserted:', data);  // Log the inserted data
       res.status(201).json({ message: 'Complaint submitted successfully', complaint: data });
     } catch (error) {
       console.error('Unexpected Error:', error.message);
