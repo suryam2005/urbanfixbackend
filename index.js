@@ -6,8 +6,9 @@ const app = express();
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
-
-app.use(cors());
+app.use(cors({
+  origin: 'https://urbanfixfrontend.vercel.app', // Replace with your actual frontend URL
+}));
 app.use(express.json()); // Middleware to parse JSON requests
 
 // Supabase setup using environment variables
