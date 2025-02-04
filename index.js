@@ -6,12 +6,7 @@ const app = express();
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
-const multer = require('multer');
-const { v4: uuidv4 } = require('uuid');
-const path = require('path');
-const fs = require('fs');
 
-// Middleware setup
 app.use(cors());
 app.use(express.json()); // Middleware to parse JSON requests
 
@@ -33,8 +28,10 @@ const generateToken = (user) => {
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization'];
   if (!token) return res.status(401).json({ message: 'Access denied. No token provided.' });
+
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ message: 'Invalid token.' });
+
     req.user = user;
     next();
   });
@@ -44,19 +41,26 @@ const authenticateToken = (req, res, next) => {
 const authenticateAdmin = (req, res, next) => {
   const token = req.headers['authorization'];
   if (!token) return res.status(401).json({ message: 'Access denied. No token provided.' });
+
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ message: 'Invalid token.' });
-    if (user.role !== 'admin') return res.status(403).json({ message: 'Access denied. Admins only.' });
+
+    if (!user.isAdmin) return res.status(403).json({ message: 'Access denied. Admins only.' });
+
     req.user = user;
     next();
   });
 };
 
-app.get('/favicon.ico', (req, res) => res.status(204));  // No Content
-
+// 🚀 FIX: Fetch complaints only for the logged-in user
 app.get('/complaints', authenticateToken, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('complaints').select('*');
+    const userId = req.user.id; // Get user ID from token
+
+    const { data, error } = await supabase
+      .from('complaints')
+      .select('*')
+      .eq('user_id', userId); // Only fetch complaints for this user
 
     if (error) {
       console.error('Supabase Fetch Error:', error);
@@ -70,49 +74,100 @@ app.get('/complaints', authenticateToken, async (req, res) => {
   }
 });
 
-// Fetch all complaints with filters
+// 🚀 FIX: Complaint Submission Endpoint
+app.post('/submit', authenticateToken, async (req, res) => {
+  console.log('Request body:', req.body);
+  console.log('User ID:', req.user.id);
+
+  const { title, description } = req.body;
+  const userId = req.user.id; // Get user ID from token
+
+  if (!title || !description) {
+    return res.status(400).json({ message: 'Title and description are required' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('complaints')
+      .insert([{ user_id: userId, title, description, status: 'pending' }])
+      .select('*');
+
+    if (error) {
+      console.error('Supabase Insert Error:', error);
+      return res.status(500).json({ message: 'Error inserting complaint', error: error.message });
+    }
+
+    console.log('Complaint inserted:', data);
+    res.status(201).json({ message: 'Complaint submitted successfully', complaint: data });
+  } catch (error) {
+    console.error('Unexpected Error:', error.message);
+    res.status(500).json({ message: 'Unexpected error occurred', error: error.message });
+  }
+});
+
+// Admin: Fetch all complaints with filters
 app.get('/admin/complaints', authenticateAdmin, async (req, res) => {
   const { status, date, user_id } = req.query;
+
   let query = supabase.from('complaints').select('*');
+
   if (status) query = query.eq('status', status);
   if (date) query = query.eq('created_at', date);
   if (user_id) query = query.eq('user_id', user_id);
+
   const { data, error } = await query;
+
   if (error) return res.status(500).json({ message: 'Error fetching complaints', error });
+
   res.json({ complaints: data });
 });
 
-// Update complaint status
+// Admin: Update complaint status
 app.put('/admin/complaints/:id/status', authenticateAdmin, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
+
   const { error } = await supabase.from('complaints').update({ status }).eq('id', id);
+
   if (error) return res.status(500).json({ message: 'Error updating status', error });
+
   res.json({ message: 'Complaint status updated' });
 });
 
-// Fetch all users
+// Admin: Fetch all users
 app.get('/admin/users', authenticateAdmin, async (req, res) => {
   const { data, error } = await supabase.from('users').select('*');
+
   if (error) return res.status(500).json({ message: 'Error fetching users', error });
+
   res.json({ users: data });
 });
 
-// Assign complaint to a team member
+// Admin: Assign complaint to a team member
 app.put('/admin/complaints/:id/assign', authenticateAdmin, async (req, res) => {
   const { id } = req.params;
   const { assigned_to } = req.body;
+
   const { error } = await supabase.from('complaints').update({ assigned_to }).eq('id', id);
+
   if (error) return res.status(500).json({ message: 'Error assigning complaint', error });
+
   res.json({ message: 'Complaint assigned successfully' });
 });
 
-// Signup endpoint
+// User Signup Endpoint
 app.post('/signup', async (req, res) => {
   const { name, email, password } = req.body;
+
   try {
-    const { data: user, error } = await supabase.auth.signUp({ email, password, options: { data: { name } } });
+    const { data: user, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { name } }
+    });
+
     if (error) return res.status(400).json({ message: error.message });
+
     const token = generateToken(user.user);
     res.status(201).json({ message: 'Signup successful', token, user: user.user });
   } catch (err) {
@@ -120,64 +175,39 @@ app.post('/signup', async (req, res) => {
   }
 });
 
-// Login endpoint
+// User Login Endpoint
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
+
   try {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
     if (error) return res.status(401).json({ message: 'Invalid email or password.' });
+
     const token = generateToken(data.user);
     res.json({ message: 'Login successful', token });
   } catch (err) {
     res.status(500).json({ message: 'An error occurred during login.' });
   }
 });
+
 // Home route
 app.get('/', (req, res) => {
-    res.send('Welcome to the backend server!');
-  });
-  
-  app.post('/submit', authenticateToken, async (req, res) => {
-    console.log('Request body:', req.body);  // Log the request body to check what is being sent
-    console.log('Token received:', req.headers['authorization']); // Log the token to check if it's being passed correctly
-  
-    const { title, description } = req.body;
-    const { id: userId } = req.user;
-  
-    if (!title || !description) {
-      return res.status(400).json({ message: 'Title and description are required' });
-    }
-  
-    try {
-      const { data, error } = await supabase
-        .from('complaints')
-        .insert([{ user_id: userId, title, description, status: 'pending' }])
-        .select('*');
-  
-      if (error) {
-        console.error('Supabase Insert Error:', error);
-        return res.status(500).json({ message: 'Error inserting complaint', error: error.message });
-      }
-  
-      console.log('Complaint inserted:', data);  // Log the inserted data
-      res.status(201).json({ message: 'Complaint submitted successfully', complaint: data });
-    } catch (error) {
-      console.error('Unexpected Error:', error.message);
-      res.status(500).json({ message: 'Unexpected error occurred', error: error.message });
-    }
-  });
-  // Profile endpoint
-app.get('/profile', authenticateToken, (req, res) => {
-    res.json({ message: 'User profile loaded', email: req.user.email });
-  });
-  
-  const PORT = process.env.PORT || 3000; // Set default port
+  res.send('Welcome to the backend server!');
+});
 
-  if (process.env.NODE_ENV !== 'vercel') {
-      app.listen(PORT, () => {
-        console.log('Server is running on port ' + PORT);
-      });
-  }
+// Profile endpoint
+app.get('/profile', authenticateToken, (req, res) => {
+  res.json({ message: 'User profile loaded', email: req.user.email });
+});
+
+const PORT = process.env.PORT || 3000; // Set default port
+
+if (process.env.NODE_ENV !== 'vercel') {
+  app.listen(PORT, () => {
+    console.log('Server is running on port ' + PORT);
+  });
+}
 
 // Vercel compatibility
 module.exports = app;
