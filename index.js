@@ -6,10 +6,12 @@ const app = express();
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
-app.use(cors({
-  origin: 'https://urbanfixfrontend.vercel.app', // Replace with your actual frontend URL
-}));
-app.use(express.json()); // Middleware to parse JSON requests
+
+// Constants
+const VALID_TAGS = ['electricity', 'canteen', 'furniture', 'campus'];
+
+app.use(cors()); // This will allow all domains
+app.use(express.json());
 
 // Supabase setup using environment variables
 const supabase = createClient(
@@ -53,44 +55,63 @@ const authenticateAdmin = (req, res, next) => {
   });
 };
 
-// 🚀 FIX: Fetch complaints only for the logged-in user
+// Get complaints with optional tag filter
 app.get('/complaints', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id; // Get user ID from token
+    const userId = req.user.id;
+    const { tag } = req.query; // Optional tag filter
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('complaints')
       .select('*')
-      .eq('user_id', userId); // Only fetch complaints for this user
+      .eq('user_id', userId);
+
+    // Add tag filter if provided
+    if (tag && VALID_TAGS.includes(tag)) {
+      query = query.contains('tags', [tag]);
+    }
+
+    // Order by creation date, newest first
+    query = query.order('created_at', { ascending: false });
+
+    const { data: complaints, error } = await query;
 
     if (error) {
       console.error('Supabase Fetch Error:', error);
       return res.status(500).json({ message: 'Error fetching complaints', error: error.message });
     }
 
-    res.json({ complaints: data });
+    res.json({ complaints });
   } catch (error) {
     console.error('Unexpected Error:', error.message);
     res.status(500).json({ message: 'Unexpected error occurred', error: error.message });
   }
 });
 
-// 🚀 FIX: Complaint Submission Endpoint
+// Submit new complaint
 app.post('/submit', authenticateToken, async (req, res) => {
-  console.log('Request body:', req.body);
-  console.log('User ID:', req.user.id);
-
-  const { title, description } = req.body;
-  const userId = req.user.id; // Get user ID from token
+  const { title, description, tags } = req.body;
+  const userId = req.user.id;
 
   if (!title || !description) {
     return res.status(400).json({ message: 'Title and description are required' });
   }
 
+  // Validate tags
+  if (tags && !tags.every(tag => VALID_TAGS.includes(tag))) {
+    return res.status(400).json({ message: 'Invalid tags provided' });
+  }
+
   try {
-    const { data, error } = await supabase
+    const { data: complaint, error } = await supabase
       .from('complaints')
-      .insert([{ user_id: userId, title, description, status: 'pending' }])
+      .insert([{ 
+        user_id: userId, 
+        title, 
+        description, 
+        status: 'pending',
+        tags: tags || [] 
+      }])
       .select('*');
 
     if (error) {
@@ -98,23 +119,75 @@ app.post('/submit', authenticateToken, async (req, res) => {
       return res.status(500).json({ message: 'Error inserting complaint', error: error.message });
     }
 
-    console.log('Complaint inserted:', data);
-    res.status(201).json({ message: 'Complaint submitted successfully', complaint: data });
+    console.log('Complaint inserted:', complaint);
+    res.status(201).json({ 
+      message: 'Complaint submitted successfully', 
+      complaint: complaint[0]
+    });
   } catch (error) {
     console.error('Unexpected Error:', error.message);
     res.status(500).json({ message: 'Unexpected error occurred', error: error.message });
   }
 });
 
+// Add this to your backend code
+
+// Simplified upvote endpoint
+app.post('/complaints/:id/upvote', authenticateToken, async (req, res) => {
+  const complaintId = req.params.id;
+  
+  try {
+    // Get current complaint
+    const { data: complaint, error: fetchError } = await supabase
+      .from('complaints')
+      .select('upvotes')
+      .eq('id', complaintId)
+      .single();
+
+    if (fetchError) {
+      console.error('Fetch Error:', fetchError);
+      return res.status(404).json({ message: 'Complaint not found' });
+    }
+
+    // Increment upvotes
+    const newUpvotes = (complaint.upvotes || 0) + 1;
+    
+    const { data: updatedComplaint, error: updateError } = await supabase
+      .from('complaints')
+      .update({ upvotes: newUpvotes })
+      .eq('id', complaintId)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('Update Error:', updateError);
+      throw updateError;
+    }
+
+    res.json(updatedComplaint);
+  } catch (error) {
+    console.error('Upvote Error:', error);
+    res.status(500).json({ message: 'Error processing upvote' });
+  }
+});
+
+// Get available tags
+app.get('/tags', authenticateToken, (req, res) => {
+  res.json({ tags: VALID_TAGS });
+});
+
 // Admin: Fetch all complaints with filters
 app.get('/admin/complaints', authenticateAdmin, async (req, res) => {
-  const { status, date, user_id } = req.query;
+  const { status, date, user_id, tag } = req.query;
 
   let query = supabase.from('complaints').select('*');
 
   if (status) query = query.eq('status', status);
   if (date) query = query.eq('created_at', date);
   if (user_id) query = query.eq('user_id', user_id);
+  if (tag && VALID_TAGS.includes(tag)) {
+    query = query.contains('tags', [tag]);
+  }
 
   const { data, error } = await query;
 
@@ -128,7 +201,10 @@ app.put('/admin/complaints/:id/status', authenticateAdmin, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  const { error } = await supabase.from('complaints').update({ status }).eq('id', id);
+  const { error } = await supabase
+    .from('complaints')
+    .update({ status })
+    .eq('id', id);
 
   if (error) return res.status(500).json({ message: 'Error updating status', error });
 
@@ -149,7 +225,10 @@ app.put('/admin/complaints/:id/assign', authenticateAdmin, async (req, res) => {
   const { id } = req.params;
   const { assigned_to } = req.body;
 
-  const { error } = await supabase.from('complaints').update({ assigned_to }).eq('id', id);
+  const { error } = await supabase
+    .from('complaints')
+    .update({ assigned_to })
+    .eq('id', id);
 
   if (error) return res.status(500).json({ message: 'Error assigning complaint', error });
 
@@ -192,17 +271,12 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Home route
-app.get('/', (req, res) => {
-  res.send('Welcome to the backend server!');
-});
-
 // Profile endpoint
 app.get('/profile', authenticateToken, (req, res) => {
   res.json({ message: 'User profile loaded', email: req.user.email });
 });
 
-const PORT = process.env.PORT || 3000; // Set default port
+const PORT = process.env.PORT || 3000;
 
 if (process.env.NODE_ENV !== 'vercel') {
   app.listen(PORT, () => {
@@ -210,5 +284,20 @@ if (process.env.NODE_ENV !== 'vercel') {
   });
 }
 
-// Vercel compatibility
+// Add this test endpoint to your backend
+app.get('/test-db', authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('complaints')
+      .select('*')
+      .limit(1);
+    
+    if (error) throw error;
+    
+    res.json({ message: 'Database connection successful', data });
+  } catch (error) {
+    res.status(500).json({ message: 'Database connection failed', error: error.message });
+  }
+});
+
 module.exports = app;
