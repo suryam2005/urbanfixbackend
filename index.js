@@ -6,6 +6,10 @@ const app = express();
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
+const path = require('path');
+const favicon = require('serve-favicon');
+
+app.use(favicon(path.join(__dirname, 'public', 'favicon.ico')));
 
 // Constants
 const VALID_TAGS = ['electricity', 'canteen', 'furniture', 'campus'];
@@ -54,7 +58,9 @@ const authenticateAdmin = (req, res, next) => {
     next();
   });
 };
-
+app.get('/', (req, res) => {
+  res.send('Welcome to the backend server!');
+});
 // Get complaints with optional tag filter
 app.get('/complaints', authenticateToken, async (req, res) => {
   try {
