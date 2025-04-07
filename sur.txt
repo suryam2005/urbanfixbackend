@@ -1,0 +1,14 @@
+Decoded Admin Token: {
+  id: '7d7364b4-f9f7-4984-a41d-34bbfe8e84b8',
+  email: 'admins@madrasco.space',
+  role: 'admin',
+  iat: 1742038421,
+  exp: 1742042021
+}
+Decoded Admin Token: {
+  id: '7d7364b4-f9f7-4984-a41d-34bbfe8e84b8',
+  email: 'admins@madrasco.space',
+  role: 'admin',
+  iat: 1742038421,
+  exp: 1742042021
+}
