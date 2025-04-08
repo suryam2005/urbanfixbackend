@@ -21,15 +21,11 @@ const VALID_TAGS = ['electricity', 'canteen', 'furniture', 'campus'];
 const allowedOrigins = ['https://urbanfix.madrasco.space', 'http://127.0.0.1:5500'];
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: '*',
   credentials: true
 }));
+
+app.use(express.json());
 
 // Supabase setup using environment variables
 const supabase = createClient(
